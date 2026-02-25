@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description"
+        content="Advanced Video Analysis Tool - Frame-by-frame video analyzer with motion detection, annotations, and color histogram">
+    <title>FrameLab — Advanced Video Analyzer</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+
+<body>
+    <!-- HEADER -->
+    <header class="app-header">
+        <h1>🔬 FrameLab</h1>
+        <div class="header-actions">
+            <button class="btn btn-secondary" id="btnExport" disabled>📥 Export Frame</button>
+            <button class="btn btn-secondary" id="btnUploadFolder">📁 Load Folder</button>
+            <button class="btn btn-primary" id="btnUpload">📂 Load Video</button>
+            <input type="file" id="fileInput" accept="video/*" style="display:none">
+            <input type="file" id="folderInput" webkitdirectory directory multiple style="display:none">
+        </div>
+    </header>
+
+    <!-- MAIN LAYOUT -->
+    <div class="main-container">
+        <!-- LEFT SIDEBAR -->
+        <div class="sidebar">
+            <!-- Upload Zone -->
+            <div class="sidebar-section glass-panel" id="uploadSection">
+                <h3>📁 Load Video</h3>
+                <div class="upload-zone" id="dropZone">
+                    <div class="icon">🎬</div>
+                    <p>Drop video or folder here</p>
+                    <p class="hint">MP4, WEBM, AVI, MKV, MOV</p>
+                </div>
+                <div class="progress-bar-wrapper" id="progressWrapper">
+                    <div class="progress-bar-fill" id="progressBar"></div>
+                </div>
+            </div>
+
+            <!-- Video List (when folder loaded) -->
+            <div class="sidebar-section glass-panel hidden" id="videoListPanel">
+                <h3 style="display:flex; justify-content:space-between; align-items:center;">
+                    <span>🎬 Videos <span class="speed-badge" id="videoCount">0</span></span>
+                    <label
+                        style="font-size:0.75rem; font-weight:normal; display:flex; align-items:center; gap:4px; cursor:pointer;"
+                        title="Keep the same frame number across videos">
+                        <input type="checkbox" id="chkLockFrame"> Lock Frame
+                    </label>
+                </h3>
+                <div class="video-list" id="videoList"></div>
+                <div style="margin-top:8px;display:flex;gap:6px;">
+                    <button class="btn btn-primary" id="btnBatchExtract" style="flex:1;font-size:0.75rem;">🎞 Batch
+                        Extract</button>
+                    <button class="btn btn-secondary" id="btnBatchOverlap" style="flex:1;font-size:0.75rem;">🔀 Batch
+                        Overlap</button>
+                </div>
+            </div>
+
+            <!-- Video Info -->
+            <div class="sidebar-section glass-panel hidden" id="videoInfoPanel">
+                <h3>📊 Video Info</h3>
+                <div class="video-info">
+                    <div class="info-row"><span class="info-label">File</span><span class="info-value"
+                            id="infoName">—</span></div>
+                    <div class="info-row"><span class="info-label">Resolution</span><span class="info-value"
+                            id="infoRes">—</span></div>
+                    <div class="info-row"><span class="info-label">Duration</span><span class="info-value"
+                            id="infoDur">—</span></div>
+                    <div class="info-row"><span class="info-label">FPS</span><span class="info-value"
+                            id="infoFps">—</span></div>
+                    <div class="info-row"><span class="info-label">Total Frames</span><span class="info-value"
+                            id="infoFrames">—</span></div>
+                    <div class="info-row"><span class="info-label">Format</span><span class="info-value"
+                            id="infoFormat">—</span></div>
+                </div>
+            </div>
+
+            <!-- Playback -->
+            <div class="sidebar-section glass-panel hidden" id="playbackPanel">
+                <h3>▶ Playback</h3>
+                <div class="playback-controls">
+                    <button class="btn-icon" id="btnSlower" title="Slower">⏪</button>
+                    <button class="btn-icon" id="btnPrev" title="Previous Frame">◀</button>
+                    <button class="btn-icon" id="btnPlay" title="Play/Pause">▶</button>
+                    <button class="btn-icon" id="btnNext" title="Next Frame">▶</button>
+                    <button class="btn-icon" id="btnFaster" title="Faster">⏩</button>
+                </div>
+                <div style="text-align:center;margin-top:8px">
+                    <span class="speed-badge" id="speedBadge">1.0x</span>
+                </div>
+            </div>
+
+            <!-- Markers -->
+            <div class="sidebar-section glass-panel hidden" id="markersPanel">
+                <h3>🏷 Frame Markers</h3>
+                <button class="btn btn-secondary" id="btnMark" style="width:100%;margin-bottom:8px">⭐ Mark
+                    Frame</button>
+                <div class="markers-list" id="markersList"></div>
+            </div>
+        </div>
+
+        <!-- CENTER VIEWPORT -->
+        <div class="viewport glass-panel">
+            <!-- View mode tabs -->
+            <div class="view-tabs">
+                <button class="view-tab active" data-view="single">🖼 Single</button>
+                <button class="view-tab" data-view="grid">⊞ Grid</button>
+                <button class="view-tab" data-view="compare">⇄ Compare</button>
+                <button class="view-tab" data-view="diff">Δ Diff</button>
+                <button class="view-tab" data-view="extract">🎞 Extract</button>
+                <button class="view-tab" data-view="overlap">🔀 Overlap</button>
+            </div>
+
+            <!-- Canvas area -->
+            <div class="canvas-wrapper" id="canvasWrapper">
+                <p class="no-video-msg" id="noVideoMsg">Load a video to begin analysis</p>
+                <canvas id="mainCanvas" class="hidden"></canvas>
+
+                <!-- Grid overlay -->
+                <div class="grid-overlay" id="gridOverlay">
+                    <div class="frame-grid" id="frameGrid"></div>
+                </div>
+
+                <!-- Compare overlay -->
+                <div class="compare-container" id="compareOverlay">
+                    <div class="compare-side">
+                        <span class="compare-label">Frame A: <span id="compALabel">—</span></span>
+                        <canvas id="compCanvasA"></canvas>
+                    </div>
+                    <div class="compare-side">
+                        <span class="compare-label">Frame B: <span id="compBLabel">—</span></span>
+                        <canvas id="compCanvasB"></canvas>
+                    </div>
+                </div>
+
+                <!-- Diff overlay -->
+                <div class="diff-container" id="diffOverlay">
+                    <canvas id="diffCanvas"></canvas>
+                </div>
+
+                <!-- Extract overlay -->
+                <div class="extract-container" id="extractOverlay">
+                    <div class="extract-preview">
+                        <h3 class="overlay-title">🎞 Frame Extraction</h3>
+                        <p class="overlay-desc">Extract a specific frame by number and download as PNG</p>
+                        <div class="extract-controls">
+                            <div class="extract-input-row">
+                                <label>Frame Number:</label>
+                                <input type="number" id="extractFrameNum" min="1" value="1" class="num-input">
+                                <span class="extract-hint" id="extractHint">/ —</span>
+                            </div>
+                            <div class="extract-input-row">
+                                <label>Or by time (sec):</label>
+                                <input type="number" id="extractTimeSec" min="0" step="0.1" value="0" class="num-input">
+                            </div>
+                            <button class="btn btn-primary" id="btnExtractPreview">👁 Preview Frame</button>
+                        </div>
+                        <canvas id="extractCanvas"
+                            style="max-width:100%;max-height:60%;border-radius:8px;margin-top:12px;"></canvas>
+                        <div class="extract-actions"
+                            style="margin-top:12px;display:flex;gap:8px;justify-content:center;">
+                            <button class="btn btn-primary" id="btnExtractDownload" disabled>📥 Download PNG</button>
+                            <button class="btn btn-secondary" id="btnExtractAll">📦 Download All Marked</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Overlap overlay -->
+                <div class="overlap-container" id="overlapOverlay">
+                    <div class="overlap-preview">
+                        <h3 class="overlay-title">🔀 Frame Overlap / Blend</h3>
+                        <p class="overlay-desc">Blend multiple frames into one composite image</p>
+                        <div class="overlap-controls">
+                            <div class="extract-input-row">
+                                <label>Frames at seconds:</label>
+                                <input type="text" id="overlapSeconds" value="1,2,3,4" class="text-input"
+                                    placeholder="e.g. 1,2,3,4">
+                            </div>
+                            <div class="extract-input-row">
+                                <label>Or by frame #:</label>
+                                <input type="text" id="overlapFrameNums" value="" class="text-input"
+                                    placeholder="e.g. 1,15,30,45">
+                            </div>
+                            <div class="extract-input-row">
+                                <label>Blend Mode:</label>
+                                <select id="overlapMode" class="select-input">
+                                    <option value="average">Average (Equal Weight)</option>
+                                    <option value="max">Lighten (Max)</option>
+                                    <option value="min">Darken (Min)</option>
+                                    <option value="diff">Difference</option>
+                                </select>
+                            </div>
+                            <div style="display:flex;gap:8px;">
+                                <button class="btn btn-primary" id="btnOverlapGenerate">🔀 Generate Blend</button>
+                                <button class="btn btn-secondary" id="btnOverlapMarked">⭐ Blend Marked Frames</button>
+                            </div>
+                        </div>
+                        <canvas id="overlapCanvas"
+                            style="max-width:100%;max-height:55%;border-radius:8px;margin-top:12px;"></canvas>
+                        <div style="margin-top:12px;text-align:center;">
+                            <button class="btn btn-primary" id="btnOverlapDownload" disabled>📥 Download
+                                Blended</button>
+                            <span class="speed-badge" id="overlapInfo" style="margin-left:8px;">—</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Frame slider & controls -->
+            <div class="frame-controls hidden" id="frameControlsBar">
+                <button class="btn-icon" id="btnPrevFrame" title="Previous Frame (←)">◀</button>
+                <div id="singleSliderWrapper" style="display:flex; flex:1; align-items:center;">
+                    <input type="range" class="frame-slider" id="frameSlider" min="0" value="0">
+                </div>
+                <div id="compareSliderWrapper" style="display:none; flex:1; align-items:center; gap:12px;">
+                    <span style="font-size:0.8rem; font-weight:bold; color:var(--accent);">A:</span>
+                    <input type="range" class="frame-slider" id="compSliderA" min="0" value="0">
+                    <span style="font-size:0.8rem; font-weight:bold; color:var(--accent2); padding-left:12px;">B:</span>
+                    <input type="range" class="frame-slider" id="compSliderB" min="0" value="0">
+                </div>
+                <button class="btn-icon" id="btnNextFrame" title="Next Frame (→)">▶</button>
+                <span class="frame-num" id="frameNum">0 / 0</span>
+            </div>
+        </div>
+
+        <!-- RIGHT PANEL -->
+        <div class="right-panel">
+            <!-- Histogram -->
+            <div class="sidebar-section glass-panel hidden" id="histPanel">
+                <h3>📈 Color Histogram</h3>
+                <canvas class="histogram-canvas" id="histCanvas"></canvas>
+            </div>
+
+            <!-- Frame Details -->
+            <div class="sidebar-section glass-panel hidden" id="frameDetailPanel">
+                <h3>🔍 Frame Details</h3>
+                <div class="video-info">
+                    <div class="info-row"><span class="info-label">Frame #</span><span class="info-value"
+                            id="detailFrame">—</span></div>
+                    <div class="info-row"><span class="info-label">Timestamp</span><span class="info-value"
+                            id="detailTime">—</span></div>
+                    <div class="info-row"><span class="info-label">Avg Brightness</span><span class="info-value"
+                            id="detailBright">—</span></div>
+                    <div class="info-row"><span class="info-label">Dominant Color</span><span class="info-value"
+                            id="detailDomColor">—</span></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- STATUS BAR -->
+    <div class="status-bar">
+        <span><span class="status-dot"></span>FrameLab v1.0</span>
+        <span id="statusText">Ready</span>
+        <span id="statusZoom" style="margin-left:auto">Zoom: 100%</span>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+    <script src="app.js"></script>
+</body>
+
+</html>
