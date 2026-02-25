@@ -80,6 +80,14 @@
         overlapCanvas: $("#overlapCanvas"),
     };
 
+    // Load saved settings
+    try {
+        if (localStorage.getItem("framelab_zoom")) S.zoom = parseFloat(localStorage.getItem("framelab_zoom")) || 1;
+        if (localStorage.getItem("framelab_lockFrame")) {
+            if (dom.chkLockFrame) dom.chkLockFrame.checked = localStorage.getItem("framelab_lockFrame") === "true";
+        }
+    } catch (e) {}
+
     const mainCtx = dom.mainCanvas.getContext("2d");
     const histCtx = dom.histCanvas.getContext("2d");
 
@@ -97,6 +105,11 @@
         }
 
         S.markers = [];
+        try {
+            const savedM = localStorage.getItem("framelab_markers_" + S.fileName);
+            if (savedM) S.markers = JSON.parse(savedM);
+        } catch (e) {}
+
         S.seeking = false;
         stopPlay();
         dom.statusText.textContent = "Loading video...";
@@ -272,8 +285,19 @@
         $("#detailFrame").textContent = idx + 1;
         $("#detailTime").textContent = time + "s";
 
-        // Get pixel data from what's currently on mainCanvas
-        const data = mainCtx.getImageData(0, 0, S.width, S.height).data;
+        // Downscale image data for performance logic to prevent unresponsiveness on large files
+        const maxDim = 640;
+        let pW = S.width, pH = S.height;
+        if (pW > maxDim || pH > maxDim) {
+            const ratio = Math.min(maxDim / pW, maxDim / pH);
+            pW = Math.round(pW * ratio);
+            pH = Math.round(pH * ratio);
+        }
+        const tempC = document.createElement("canvas");
+        tempC.width = pW; tempC.height = pH;
+        tempC.getContext("2d").drawImage(S.video, 0, 0, pW, pH);
+        const data = tempC.getContext("2d").getImageData(0, 0, pW, pH).data;
+
         let sum = 0;
         const len = data.length;
         for (let i = 0; i < len; i += 16) {
@@ -308,12 +332,23 @@
     // HISTOGRAM
     // ═══════════════════════════════════════
     function drawHistogram() {
-        const data = mainCtx.getImageData(0, 0, S.width, S.height).data;
+        const maxDim = 320;
+        let pW = S.width, pH = S.height;
+        if (pW > maxDim || pH > maxDim) {
+            const ratio = Math.min(maxDim / pW, maxDim / pH);
+            pW = Math.round(pW * ratio);
+            pH = Math.round(pH * ratio);
+        }
+        const tempC = document.createElement("canvas");
+        tempC.width = pW; tempC.height = pH;
+        tempC.getContext("2d").drawImage(S.video, 0, 0, pW, pH);
+        const data = tempC.getContext("2d").getImageData(0, 0, pW, pH).data;
+
         const rHist = new Uint32Array(256);
         const gHist = new Uint32Array(256);
         const bHist = new Uint32Array(256);
 
-        for (let i = 0; i < data.length; i += 4) {
+        for (let i = 0; i < data.length; i += 16) {
             rHist[data[i]]++;
             gHist[data[i + 1]]++;
             bHist[data[i + 2]]++;
@@ -496,6 +531,7 @@
         S.zoom = Math.max(0.2, Math.min(5, S.zoom + delta));
         applyTransform();
         dom.statusZoom.textContent = `Zoom: ${Math.round(S.zoom * 100)}%`;
+        try { localStorage.setItem("framelab_zoom", S.zoom); } catch(ex){}
     });
 
     // ═══════════════════════════════════════
@@ -559,6 +595,7 @@
         if (S.markers.includes(S.currentFrame)) return;
         S.markers.push(S.currentFrame);
         S.markers.sort((a, b) => a - b);
+        try { localStorage.setItem("framelab_markers_" + S.fileName, JSON.stringify(S.markers)); } catch(e){}
         renderMarkers();
     }
 
@@ -571,6 +608,7 @@
             el.addEventListener("click", (e) => {
                 if (e.target.classList.contains("marker-remove")) {
                     S.markers = S.markers.filter((x) => x !== m);
+                    try { localStorage.setItem("framelab_markers_" + S.fileName, JSON.stringify(S.markers)); } catch(ex){}
                     renderMarkers();
                     return;
                 }
@@ -697,9 +735,25 @@
         const folder = zip.folder(`extracted_frame${frameNum}`);
         let completed = 0;
         const total = S.videoFiles.length;
+        
         dom.statusText.textContent = `Batch extracting frame ${frameNum} from ${total} videos...`;
+        dom.progressWrapper.classList.add("visible");
+        dom.progressBar.style.width = "0%";
+		dom.progressWrapper.style.display = "block";
 
-        S.videoFiles.forEach((v) => {
+        function processNext(idx) {
+            if (idx >= total) {
+                zip.generateAsync({ type: "blob" }, (meta) => {
+                    dom.progressBar.style.width = `${meta.percent}%`;
+                    dom.statusText.textContent = `Zipping: ${meta.percent.toFixed(1)}%`;
+                }).then((blob) => {
+                    saveAs(blob, `extracted_frame${frameNum}.zip`);
+                    dom.statusText.textContent = `✅ Exported ${total} frames as ZIP`;
+                    dom.progressWrapper.style.display = "none";
+                });
+                return;
+            }
+            const v = S.videoFiles[idx];
             extractFrameFromFile(v.file, frameNum - 1, (canvas) => {
                 const baseName = v.name.replace(/\.[^.]+$/, "");
                 const dataUrl = canvas.toDataURL("image/png");
@@ -707,14 +761,13 @@
                 folder.file(`${baseName}_frame${frameNum}.png`, base64, { base64: true });
                 completed++;
                 dom.statusText.textContent = `Batch extract: ${completed}/${total}`;
-                if (completed === total) {
-                    zip.generateAsync({ type: "blob" }).then((blob) => {
-                        saveAs(blob, `extracted_frame${frameNum}.zip`);
-                        dom.statusText.textContent = `✅ Exported ${total} frames as ZIP`;
-                    });
-                }
+                dom.progressBar.style.width = `${(completed / total) * 100}%`;
+                
+                // Yield to main thread
+                setTimeout(() => processNext(idx + 1), 10);
             });
-        });
+        }
+        processNext(0);
     }
 
     function batchOverlap() {
@@ -729,9 +782,24 @@
         const folder = zip.folder(`overlap_${mode}_${seconds.length}frames`);
         let completed = 0;
         const total = S.videoFiles.length;
+        
         dom.statusText.textContent = `Batch overlap: ${total} videos at ${seconds.join(",")}s (${mode})...`;
+        dom.progressWrapper.style.display = "block";
+        dom.progressBar.style.width = "0%";
 
-        S.videoFiles.forEach((v) => {
+        function processNext(idx) {
+            if (idx >= total) {
+                zip.generateAsync({ type: "blob" }, (meta) => {
+                    dom.progressBar.style.width = `${meta.percent}%`;
+                    dom.statusText.textContent = `Zipping: ${meta.percent.toFixed(1)}%`;
+                }).then((blob) => {
+                    saveAs(blob, `overlap_${mode}_${seconds.length}frames.zip`);
+                    dom.statusText.textContent = `✅ Exported ${total} overlaps as ZIP`;
+                    dom.progressWrapper.style.display = "none";
+                });
+                return;
+            }
+            const v = S.videoFiles[idx];
             overlapFramesFromFile(v.file, seconds, mode, (canvas) => {
                 const baseName = v.name.replace(/\.[^.]+$/, "");
                 const dataUrl = canvas.toDataURL("image/png");
@@ -739,14 +807,11 @@
                 folder.file(`${baseName}_overlap.png`, base64, { base64: true });
                 completed++;
                 dom.statusText.textContent = `Batch overlap: ${completed}/${total}`;
-                if (completed === total) {
-                    zip.generateAsync({ type: "blob" }).then((blob) => {
-                        saveAs(blob, `overlap_${mode}_${seconds.length}frames.zip`);
-                        dom.statusText.textContent = `✅ Exported ${total} overlaps as ZIP`;
-                    });
-                }
+                dom.progressBar.style.width = `${(completed / total) * 100}%`;
+                setTimeout(() => processNext(idx + 1), 10);
             });
-        });
+        }
+        processNext(0);
     }
 
     // Helper: extract a single frame from a video file
@@ -1029,6 +1094,12 @@
     $$(".view-tab").forEach((tab) => {
         tab.addEventListener("click", () => setView(tab.dataset.view));
     });
+
+    if (dom.chkLockFrame) {
+        dom.chkLockFrame.addEventListener("change", (e) => {
+            try { localStorage.setItem("framelab_lockFrame", e.target.checked); } catch(ex){}
+        });
+    }
 
     // Compare sliders
     dom.compSliderA.addEventListener("input", renderCompare);
